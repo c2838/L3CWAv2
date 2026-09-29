@@ -11,6 +11,7 @@ CWA_API_URL = (
 )
 
 
+# 檢查 dict 型別，型別錯誤則回傳空值
 def as_dict(value):
     """不是 dict 時回傳空 dict。"""
 
@@ -20,6 +21,7 @@ def as_dict(value):
     return {}
 
 
+# 檢查 list 型別，型別錯誤則回傳空值
 def as_list(value):
     """不是 list 時回傳空 list。"""
 
@@ -29,6 +31,7 @@ def as_list(value):
     return []
 
 
+# 檢查 float 型別，型別錯誤則回傳空值
 def to_float(value):
     """將一般氣象數值轉成 float，無效值轉成 None。"""
 
@@ -53,6 +56,7 @@ def to_float(value):
     return number
 
 
+# 格式化回傳特殊值
 def parse_precipitation(value):
     """轉換降水量，並保留特殊狀態。"""
 
@@ -102,6 +106,7 @@ def find_wgs84_coordinate(coordinates):
     return None
 
 
+# 格式化觀測資料格式
 def normalize_station(station, fetched_at):
     """將一筆 CWA 測站資料轉成固定格式。"""
 
@@ -156,6 +161,7 @@ def normalize_station(station, fetched_at):
     }
 
 
+# fetch api function
 def fetch_stations(api_key):
     """向 CWA API 取得測站資料。"""
 
