@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import requests
 from dotenv import load_dotenv
 
+from upsert_db import save_observations
 
 CWA_API_URL = (
     "https://opendata.cwa.gov.tw/"
@@ -259,6 +260,8 @@ def main():
             "沒有成功標準化的測站資料"
         )
 
+    observaztion_data_amount = save_observations(normalized_stations)
+    print('資料庫目前總比數', observaztion_data_amount)
 
 
 if __name__ == "__main__":
