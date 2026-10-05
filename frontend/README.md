@@ -4,10 +4,10 @@ Vue 3＋Vite，透過同站 `GET /api/observations` 顯示已保存的中央氣�
 
 ## 本機啟動
 
-在專案根目錄啟動既有的唯讀 API：
+在專案根目錄啟動整合 API（同時提供查詢、健康檢查與受保護的更新入口）：
 
 ```sh
-.venv/bin/python -B -m api.observations
+.venv/bin/python -B -m api.refresh
 ```
 
 另一個終端在專案根目錄啟動前端：
@@ -33,8 +33,9 @@ npm --prefix frontend run build
 - 比較圖每頁 8 站，支援氣溫、濕度、風速、累積降雨及由高／低排序；刻度以整個篩選集合計算，不隨頁碼改變。
 - 表格每頁 10 站，預設氣溫降序。除測站名稱／位置外，各顯示欄位可升降排序；缺值始終放在最後。
 - 時間使用 `Asia/Taipei`；降雨是當日累積值，雨跡與 6 小時無雨保留原狀態標示。
-- API 中的負降雨值由前端顯示為「—（異常）」並排除數值計算；API／資料庫原值不改動，來源轉換仍需追查。
+- 新資料的負降雨值已由後端轉為缺值；既有歷史負值在前端顯示為「—（異常）」並排除數值計算。歷史資料尚未批次修復，-990 的原始代碼意義仍未確認。
 - 初次失敗顯示重試；重新讀取失敗保留上次成功資料與時間。空資料及等待狀態均有提示。
+- API 回傳的最近一次 CWA 更新失敗狀態會公開顯示，包含嘗試時間與上次成功時間；後續更新成功、重新讀取後解除提示。
 - 「重新讀取」僅呼叫 GET，不觸發 `POST /api/refresh`。前端沒有 CWA、Turso 或管理更新憑證。
 
 ## 元件
@@ -48,3 +49,5 @@ npm --prefix frontend run build
 - `weather.js`：數值／時間格式、缺值排序、長條比例與降雨顯示規則。
 
 OpenStreetMap 底圖需要網路，地圖保留來源標示；底圖讀取失敗時提供提示，測站圓點仍可查看。底圖使用遵循 [OpenStreetMap Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/)。
+
+完整資料流、環境設定、schema、管理更新、架構問題與驗收範圍請見 [專案 README](../README.md)。
