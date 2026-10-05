@@ -12,6 +12,7 @@ const meta = ref({})
 const loading = ref(false)
 const loaded = ref(false)
 const error = ref('')
+const refreshWarning = ref('')
 const county = ref('')
 const station = ref('')
 const selectedId = ref('')
@@ -109,6 +110,13 @@ async function reload() {
     validatePayload(payload)
     observations.value = displayObservations(payload.data)
     meta.value = payload.meta
+    // 只在成功讀取後更新警告；讀取失敗時保留上次資料與更新狀態。
+    refreshWarning.value =
+      typeof payload.warning?.message === 'string'
+        ? payload.data.length
+          ? payload.warning.message
+          : '更新失敗，目前尚無可顯示的觀測資料。'
+        : ''
     loaded.value = true
     if (county.value && !counties.value.includes(county.value)) county.value = ''
     if (station.value && !countyStations.value.some((row) => row.station_id === station.value))
@@ -158,6 +166,22 @@ onBeforeUnmount(() => controller?.abort())
     <div v-if="error" class="status-message error-message" role="alert">
       <span>{{ error }}</span
       ><button class="subtle-button" :disabled="loading" @click="reload">重試</button>
+    </div>
+    <div
+      v-if="refreshWarning"
+      class="status-message error-message refresh-warning"
+      role="status"
+    >
+      <div class="refresh-warning-copy">
+        <strong>最近一次資料更新失敗</strong>
+        <p>{{ refreshWarning }}</p>
+        <p class="footnote">
+          最近更新嘗試：{{ timeText(meta.refresh?.attempted_at) }}
+          <template v-if="meta.refresh?.last_success_at">
+            · 上次更新成功：{{ timeText(meta.refresh.last_success_at) }}
+          </template>
+        </p>
+      </div>
     </div>
     <div v-if="loading && !loaded" class="status-message" role="status">正在讀取測站觀測資料…</div>
     <template v-if="loaded">

@@ -31,7 +31,7 @@
 }
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
 }
 button,
 input,
@@ -816,6 +816,13 @@ th[aria-sort='descending'] .sort-button {
   background: #fff4eb;
   border-color: #f0d8bd;
   color: #956031;
+}
+.refresh-warning-copy {
+  min-width: 0;
+}
+.refresh-warning .footnote {
+  margin-top: 4px;
+  color: inherit;
 }
 .dashboard-footer {
   display: flex;
