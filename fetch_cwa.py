@@ -1,15 +1,21 @@
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 
-from upsert_db import save_observations
+from upsert_db import save_observations as save_observations_to_sqlite
 
 CWA_API_URL = (
     "https://opendata.cwa.gov.tw/"
     "api/v1/rest/datastore/O-A0003-001"
 )
+ENV_PATH = Path(__file__).resolve().with_name(".env")
+
+class CWAError(Exception):
+    """取得 CWA 資料時發生的可處理錯誤。"""
+    pass
 
 
 # 檢查 dict 型別，型別錯誤則回傳空值
@@ -164,7 +170,7 @@ def normalize_station(station, fetched_at):
 
 # fetch api function
 def fetch_stations(api_key):
-    """向 CWA API 取得測站資料。"""
+    """向 CWA API 取得測站資料，失敗時拋出 CWAError。"""
 
     params = {
         "Authorization": api_key,
@@ -177,70 +183,53 @@ def fetch_stations(api_key):
             params=params,
             timeout=15,
         )
-    except requests.RequestException as error:
-        # 不直接輸出 error，避免例外訊息包含授權碼網址。
-        print(
-            "API 連線失敗：",
-            type(error).__name__,
-        )
-        raise SystemExit(1)
-
-    print("HTTP status:", response.status_code)
-    print(
-        "Content-Type:",
-        response.headers.get("Content-Type"),
-    )
+    except requests.RequestException:
+        # 隱藏原始例外，避免其包含帶有金鑰的 URL。
+        raise CWAError("無法連線至 CWA") from None
 
     if response.status_code != 200:
-        print("API 回應失敗，暫不解析內容")
-        raise SystemExit(1)
+        raise CWAError(
+            f"CWA HTTP 回應失敗：{response.status_code}"
+        )
 
     try:
         payload = response.json()
-    except requests.exceptions.JSONDecodeError:
-        print("API 回應不是有效的 JSON")
-        raise SystemExit(1)
+    except ValueError:
+        raise CWAError(
+            "CWA 回應不是有效的 JSON"
+        ) from None
 
-    success = payload.get("success")
+    if not isinstance(payload, dict):
+        raise CWAError("CWA 回應不是預期的 dict")
 
-    if success not in (True, "true"):
-        print(
-            "CWA API 回傳失敗，success =",
-            repr(success),
-        )
-        raise SystemExit(1)
+    if payload.get("success") not in (True, "true"):
+        raise CWAError("CWA 回報資料取得失敗")
 
     records = payload.get("records")
 
     if not isinstance(records, dict):
-        raise SystemExit(
-            "records 不是預期的 dict"
-        )
+        raise CWAError("records 不是預期的 dict")
 
     stations = records.get("Station")
 
     if not isinstance(stations, list):
-        raise SystemExit(
-            "Station 不是預期的 list"
-        )
+        raise CWAError("Station 不是預期的 list")
 
     if not stations:
-        raise SystemExit(
-            "Station 清單是空的"
-        )
+        raise CWAError("Station 清單是空的")
 
     return stations
 
 
-def main():
-    load_dotenv()
+def fetch_normalized_observations():
+    """取得並標準化 CWA 資料，不寫入資料庫。"""
+
+    load_dotenv(ENV_PATH, override=False)
 
     api_key = os.getenv("CWA_API_KEY")
 
     if not api_key:
-        raise SystemExit(
-            "找不到 CWA_API_KEY，請檢查 .env"
-        )
+        raise CWAError("缺少 CWA_API_KEY 設定")
 
     stations = fetch_stations(api_key)
 
@@ -249,19 +238,47 @@ def main():
         timezone.utc
     ).isoformat(timespec="seconds")
 
-    normalized_stations = [
-        normalize_station(station, fetched_at)
-        for station in stations
-        if isinstance(station, dict)
-    ]
+    observations = []
 
-    if not normalized_stations:
-        raise SystemExit(
-            "沒有成功標準化的測站資料"
+    for station in stations:
+        if not isinstance(station, dict):
+            raise CWAError("測站資料不是預期的 dict")
+
+        observation = normalize_station(station, fetched_at)
+
+        # 這三個欄位是資料表要求的必要文字欄位。
+        required_fields = (
+            "station_id",
+            "station_name",
+            "observed_at",
         )
 
-    observaztion_data_amount = save_observations(normalized_stations)
-    print('資料庫目前總比數', observaztion_data_amount)
+        for field in required_fields:
+            value = observation[field]
+
+            if not isinstance(value, str) or not value.strip():
+                raise CWAError(
+                    f"測站缺少有效的必要欄位：{field}"
+                )
+
+        observations.append(observation)
+
+    if not observations:
+        raise CWAError("沒有可用的標準化測站資料")
+
+    return observations
+
+
+def main():
+    try:
+        observations = fetch_normalized_observations()
+    except CWAError as error:
+        print("CWA 取得失敗：", error)
+        raise SystemExit(1) from None
+
+    database_count = save_observations_to_sqlite(observations)
+
+    print("本機資料庫總筆數：", database_count)
 
 
 if __name__ == "__main__":
