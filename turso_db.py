@@ -1,6 +1,7 @@
 import os
 from contextlib import closing
 from pathlib import Path
+from datetime import datetime, timezone
 
 import libsql
 from dotenv import load_dotenv
@@ -59,7 +60,80 @@ def get_observation_count():
     return row[0]
 
 
-def save_observations(stations):
+def get_refresh_status():
+    """查詢最近一次更新結果；尚無紀錄時回傳 None。"""
+
+    with closing(connect_turso()) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                last_attempt_at,
+                last_attempt_status,
+                last_success_at,
+                error_code
+            FROM weather_refresh_status
+            WHERE id = 1
+            """
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "attempted_at": row[0],
+        "status": row[1],
+        "last_success_at": row[2],
+        "error_code": row[3],
+    }
+
+
+def _write_refresh_status(connection, status, error_code=None):
+    """使用既有連線寫入狀態，由呼叫者負責交易。"""
+
+    attempted_at = datetime.now(timezone.utc).isoformat(
+        timespec="microseconds"
+    )
+    last_success_at = attempted_at if status == "succeeded" else None
+
+    connection.execute(
+        """
+        INSERT INTO weather_refresh_status (
+            id, last_attempt_at, last_attempt_status,
+            last_success_at, error_code
+        )
+        VALUES (1, ?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE SET
+            last_attempt_at = excluded.last_attempt_at,
+            last_attempt_status = excluded.last_attempt_status,
+            last_success_at = CASE
+                WHEN excluded.last_attempt_status = 'succeeded'
+                THEN excluded.last_success_at
+                ELSE weather_refresh_status.last_success_at
+            END,
+            error_code = excluded.error_code
+        """,
+        (attempted_at, status, last_success_at, error_code),
+    )
+
+
+def record_refresh_failure(error_code="CWA_UNAVAILABLE"):
+    """保存失敗結果，保留上一次成功時間及既有觀測資料。"""
+
+    if error_code not in {"CWA_UNAVAILABLE", "DATABASE_UNAVAILABLE"}:
+        raise ValueError("不支援的更新錯誤碼")
+
+    with closing(connect_turso()) as connection:
+        connection.execute("BEGIN")
+
+        try:
+            _write_refresh_status(connection, "failed", error_code)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def save_observations(stations, *, record_refresh_success=False):
     """將一批標準化測站資料 UPSERT 至 Turso，回傳總筆數。"""
 
     if not stations:
@@ -77,6 +151,10 @@ def save_observations(stations):
 
         try:
             connection.executemany(UPSERT_SQL, parameters)
+
+            if record_refresh_success:
+                _write_refresh_status(connection, "succeeded")
+
             connection.commit()
         except Exception:
             connection.rollback()

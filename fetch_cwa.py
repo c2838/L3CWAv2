@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from math import isfinite
 
 import requests
 from dotenv import load_dotenv
@@ -82,8 +83,8 @@ def parse_precipitation(value):
     if numeric_value == -98:
         return 0.0, "no_rain_6h"
 
-    # -99 代表缺值或資料異常。
-    if numeric_value == -99:
+    # -98 已在上方處理；其餘負值與非有限數值視為缺值。
+    if not isfinite(numeric_value) or numeric_value < 0:
         return None, "missing"
 
     return numeric_value, "measured"

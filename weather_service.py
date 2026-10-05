@@ -1,19 +1,22 @@
 from fetch_cwa import CWAError, fetch_normalized_observations
 from turso_db import (
     get_latest_observations,
+    get_refresh_status,
+    record_refresh_failure,
     save_observations as save_observations_to_turso,
 )
 
 
 def get_observations_payload(county_name=None, station_id=None):
-    """查詢 Turso，組成共用的資料回應。"""
+    """查詢 Turso，組成資料與最近一次更新狀態的回應。"""
 
     observations = get_latest_observations(
         county_name=county_name,
         station_id=station_id,
     )
+    refresh_status = get_refresh_status()
 
-    return {
+    payload = {
         "data": observations,
         "meta": {
             "count": len(observations),
@@ -25,16 +28,32 @@ def get_observations_payload(county_name=None, station_id=None):
                 (row["fetched_at"] for row in observations),
                 default=None,
             ),
+            "refresh": refresh_status,
         },
     }
 
+    if refresh_status is not None and refresh_status["status"] == "failed":
+        messages = {
+            "CWA_UNAVAILABLE": "CWA 更新失敗，目前顯示最後一次保存的資料",
+            "DATABASE_UNAVAILABLE": "資料更新失敗，目前顯示最後一次保存的資料",
+        }
+        payload["warning"] = {
+            "code": refresh_status["error_code"],
+            "message": messages[refresh_status["error_code"]],
+        }
+
+    return payload
+
 
 def refresh_turso_observations():
-    """取得最新 CWA 資料並寫入 Turso，回傳更新摘要。"""
+    """取得最新 CWA 資料，同時寫入觀測資料與成功狀態。"""
 
     observations = fetch_normalized_observations()
 
-    database_count = save_observations_to_turso(observations)
+    database_count = save_observations_to_turso(
+        observations,
+        record_refresh_success=True,
+    )
 
     return {
         "processed_count": len(observations),
@@ -44,33 +63,20 @@ def refresh_turso_observations():
 
 
 def refresh_and_get_observations_payload():
-    """更新後回傳資料；CWA 失敗時回傳 Turso 既有資料。"""
+    """更新後回傳資料；CWA 失敗時保存狀態並回傳既有資料。"""
 
     try:
         summary = refresh_turso_observations()
     except CWAError:
+        record_refresh_failure("CWA_UNAVAILABLE")
         payload = get_observations_payload()
 
-        # 沒有既有資料可回退時，將 CWAError 往上傳遞。
+        # 沒有既有資料可回退時，將原本的 CWAError 往上傳遞。
         if not payload["data"]:
             raise
-
-        payload["meta"]["refresh"] = {
-            "status": "failed",
-        }
-
-        payload["warning"] = {
-            "code": "CWA_UNAVAILABLE",
-            "message": "更新失敗，目前顯示最後一次成功取得的資料",
-        }
 
         return payload
 
     payload = get_observations_payload()
-
-    payload["meta"]["refresh"] = {
-        "status": "succeeded",
-        **summary,
-    }
-
+    payload["meta"]["refresh"].update(summary)
     return payload
