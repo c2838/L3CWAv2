@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="680" viewBox="0 0 1600 680" role="img" aria-labelledby="title desc">
+<title id="title">臺灣氣象觀測資料流</title>
+<desc id="desc">cron-job.org 每十分鐘觸發受保護的 POST /api/refresh，由 Python 後端取得 CWA 資料並標準化，於同一次請求保存觀測與成功狀態至 Turso。Vue 公開頁面透過 GET /api/observations 呼叫 Python 後端查詢 Turso，再接收 JSON。標準化與 Python 後端以虛線群組呈現。</desc>
+<defs>
+ <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#64748b"/></marker>
+ <marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#2563eb"/></marker>
+ <style>
+ text{font-family:-apple-system,BlinkMacSystemFont,'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;fill:#172b4d}
+ .node{stroke-width:1.8}
+ .main{font-size:25px;font-weight:650;text-anchor:middle}
+ .sub{font-size:17px;fill:#52647a;text-anchor:middle}
+ .route{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:19px;font-weight:600;text-anchor:middle}
+ .line{fill:none;stroke:#64748b;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}
+ .return{fill:none;stroke:#2563eb;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#blue)}
+ </style>
+</defs>
+<rect width="1600" height="680" rx="24" fill="#f8fafc"/>
+<text x="52" y="58" font-size="30" font-weight="700">臺灣氣象觀測 · 資料流</text>
+<text x="52" y="90" font-size="17" fill="#52647a">定時取得觀測資料，公開頁面讀取已保存的快照</text>
+<rect x="958" y="115" width="326" height="438" rx="22" fill="#fff" stroke="#94a3b8" stroke-width="1.8" stroke-dasharray="7 7"/>
+<rect x="1036" y="103" width="166" height="25" fill="#f8fafc"/>
+<text x="1119" y="121" class="sub">後端處理</text>
+<text x="52" y="148" font-size="15" font-weight="700" fill="#059669">資料更新</text>
+<text x="52" y="418" font-size="15" font-weight="700" fill="#2563eb">公開查詢</text>
+<!-- 定時更新 -->
+<rect x="52" y="170" width="250" height="94" rx="17" fill="#ecfdf5" stroke="#6ee7b7" class="node"/>
+<text x="177" y="211" class="main">cron-job.org</text>
+<text x="177" y="240" class="sub">每 10 分鐘觸發</text>
+<ellipse cx="478" cy="217" rx="132" ry="37" fill="#fff" stroke="#a7c9db" class="node"/>
+<text x="478" y="224" class="route">POST /api/refresh</text>
+<rect x="660" y="170" width="244" height="94" rx="17" fill="#fff7ed" stroke="#fdba74" class="node"/>
+<text x="782" y="211" class="main">CWA API</text>
+<text x="782" y="240" class="sub">O-A0003-001</text>
+<rect x="990" y="170" width="260" height="94" rx="17" fill="#eff6ff" stroke="#93c5fd" class="node"/>
+<text x="1120" y="211" class="main">標準化資料</text>
+<text x="1120" y="240" class="sub">數值轉換與特殊值處理</text>
+<path d="M302 217H343" class="line"/>
+<path d="M611 217H657" class="line"/>
+<path d="M904 217H987" class="line"/>
+<!-- 遠端儲存 -->
+<path d="M1370 312V399C1370 426 1534 426 1534 399V312Z" fill="#f0fdfa" stroke="#5eead4" class="node"/>
+<ellipse cx="1452" cy="312" rx="82" ry="24" fill="#ccfbf1" stroke="#5eead4" class="node"/>
+<text x="1452" y="369" class="main">Turso</text>
+<text x="1452" y="398" class="sub">觀測與更新狀態</text>
+<path d="M1250 217H1452V285" class="line"/>
+<text x="1401" y="164" class="sub">同一次請求</text>
+<text x="1401" y="187" class="sub">保存觀測與成功狀態</text>
+<!-- 公開查詢 -->
+<rect x="52" y="440" width="250" height="94" rx="17" fill="#eff6ff" stroke="#93c5fd" class="node"/>
+<text x="177" y="481" class="main">Vue 公開頁面</text>
+<text x="177" y="510" class="sub">瀏覽、篩選與重新讀取</text>
+<ellipse cx="478" cy="487" rx="132" ry="37" fill="#fff" stroke="#a7c9db" class="node"/>
+<text x="478" y="494" class="route">GET /api/observations</text>
+<rect x="990" y="440" width="260" height="94" rx="17" fill="#eff6ff" stroke="#93c5fd" class="node"/>
+<text x="1120" y="481" class="main">Python 後端</text>
+<text x="1120" y="510" class="sub">查詢各站最新觀測與狀態</text>
+<path d="M302 487H343" class="line"/>
+<path d="M611 487H987" class="line"/>
+<text x="797" y="471" class="sub">公開讀取</text>
+<path d="M1250 487H1452V427" class="line"/>
+<text x="1401" y="522" class="sub">查詢最新觀測與更新狀態</text>
+<path d="M1120 534V580H177V537" class="return"/>
+<rect x="615" y="566" width="138" height="27" rx="7" fill="#f8fafc"/>
+<text x="684" y="586" class="sub" style="fill:#2563eb">JSON 回應</text>
+<text x="52" y="637" font-size="16" fill="#52647a">POST 由 Python 後端執行，圖中省略更新 handler；CWA 與 Turso 憑證留在後端。</text>
+</svg>
