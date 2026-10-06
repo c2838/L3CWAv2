@@ -2,11 +2,12 @@
 
 使用中央氣象署 `O-A0003-001` 測站觀測資料，完成資料取得、標準化、SQLite／Turso 儲存與 Vue 視覺化。本專案呈現測站的即時觀測快照；氣溫、濕度、氣壓、風速、風向及降雨都可追溯至資料來源。
 
-目前已完成 CWA 資料取得、SQLite／Turso 儲存、Python API、Vue 視覺化及 Vercel 正式部署，具備作業交付與展示所需的核心流程。cron-job.org 每 10 分鐘更新已啟用；截至 2026-10-07，公開查詢、真實 CWA 更新、排程簡短回應、資料一致性與重新部署後排程持續運作均已驗收。正式環境的失敗情境、通知實際投遞與實體手機操作仍列為未驗證項目。
+目前已完成 CWA 資料取得、SQLite／Turso 儲存、Python API、Vue 視覺化及 Vercel 正式部署，具備作業交付與展示所需的核心流程。cron-job.org 每 10 分鐘更新與公開觀測查詢的 60 秒 Vercel CDN 快取已啟用；截至 2026-10-07，公開查詢、真實 CWA 更新、排程簡短回應、資料一致性與重新部署後排程持續運作均已驗收。正式環境的失敗情境、通知實際投遞與實體手機操作仍列為未驗證項目。
 
 **正式網站：[臺灣氣象觀測](https://l3-cw-av2-green.vercel.app/)**
 
 ![臺灣氣象觀測網站截圖](docs/images/website-pic.png)
+
 ## 功能
 
 - 縣市篩選與可搜尋的測站下拉選單。
@@ -16,6 +17,7 @@
 - 顯示觀測時間、資料擷取時間，以及最近一次更新失敗的公開提示。
 - 初次讀取失敗可重試；後續讀取失敗保留上次成功取得的資料。
 - 響應式版面；時間以 `Asia/Taipei` 顯示。
+- 公開觀測查詢使用 60 秒 Vercel CDN 快取，減少重複執行 Python 與查詢 Turso。
 
 ## 技術與模組
 
@@ -28,6 +30,7 @@
 | 前端 | Vue 3、Vite、Leaflet、OpenStreetMap 底圖 |
 | 部署 | Vercel 靜態前端與 Python Functions；公開查詢、更新及重新部署已驗收 |
 | 排程 | cron-job.org 每 10 分鐘呼叫受保護的更新 API |
+| 快取 | Vercel CDN 保存公開觀測查詢的成功 JSON 回應 60 秒 |
 
 ```text
 .
@@ -56,7 +59,7 @@ cron-job.org 已每 10 分鐘帶授權呼叫 `POST /api/refresh`，由 Python �
 
 Vue 透過後端 API 讀取 Turso 的資料。CWA 金鑰、Turso token 與管理更新 token 都由後端使用；瀏覽器不直接連線 CWA 或 Turso。
 
-畫面上的「重新讀取」只呼叫 `GET /api/observations`。只有管理更新成功後，資料庫才會取得新一批 CWA 資料；因此重讀相同內容並不表示前端快取失效。原 GitHub 氣象更新 workflow 已移除，cron-job.org 排程已啟用，真實自動更新與重新部署後持續運作均已驗收。
+畫面上的「重新讀取」只呼叫 `GET /api/observations`。只有管理更新成功後，資料庫才會取得新一批 CWA 資料；因此重讀相同內容並不表示重新取得過 CWA 資料。公開查詢另使用 60 秒 CDN 快取；按下重新讀取仍可能收到有效的快取快照。原 GitHub 氣象更新 workflow 已移除，cron-job.org 排程已啟用，真實自動更新與重新部署後持續運作均已驗收。
 
 本機 SQLite 是另一條練習流程：`python -m fetch_cwa` 取得並標準化 CWA 資料，再保存至本機 `.db`。本機 SQLite 與 Turso 不會自動同步；網站 API 使用 Turso。
 
@@ -236,7 +239,7 @@ python -B -m fetch_cwa
 | 方法／路徑 | 授權與行為 |
 |---|---|
 | `GET /api/health` | 公開，確認 handler 可回應；不檢查 CWA 或資料庫健康 |
-| `GET /api/observations` | 公開，查詢各站最新資料與最近更新狀態 |
+| `GET /api/observations` | 公開，查詢各站最新資料與最近更新狀態；HTTP 200 使用 60 秒 CDN 快取 |
 | `GET /api/observations?county_name=南投縣` | 可依縣市篩選 |
 | `GET /api/observations?station_id=C2I210` | 可依測站篩選；也可同時指定縣市 |
 | `POST /api/refresh` | 需要 `Authorization: Bearer <REFRESH_API_TOKEN>`，更新全部測站 |
@@ -248,7 +251,27 @@ python -B -m fetch_cwa
 
 簡短模式的 CWA 失敗會先保存失敗狀態，再回 HTTP 503／`CWA_UNAVAILABLE`；一般完整模式有既有資料時仍可回 HTTP 200 與 warning。公開 GET 維持讀取舊觀測與最近更新狀態。資料庫操作失敗回 HTTP 503／`DATABASE_UNAVAILABLE`。
 
-JSON 回應設定 Content-Type、正確的 UTF-8 byte Content-Length 與 `Cache-Control: no-store`。資料庫不可用時回傳 503 與固定錯誤碼，不回傳原始例外或帶憑證的 URL。
+JSON 回應設定 Content-Type 與正確的 UTF-8 byte Content-Length。共用 `send_json()` 預設使用 `Cache-Control: no-store`；公開觀測查詢的 HTTP 200 回應改用下一節的 CDN 快取設定。資料庫不可用時回傳 503 與固定錯誤碼，不回傳原始例外或帶憑證的 URL。
+
+### 公開查詢的 60 秒 CDN 快取
+
+`GET /api/observations` 的 HTTP 200 回應使用：
+
+```http
+Cache-Control: public, max-age=0, must-revalidate
+Vercel-CDN-Cache-Control: max-age=60
+```
+
+第一個標頭要求瀏覽器重用回應前向伺服器確認；第二個標頭只控制 Vercel CDN，讓有效快取直接回應訪客，省掉當次 Function 執行與 Turso 查詢。Vercel 會消耗第二個標頭，所以正式瀏覽器回應看不到它屬於正常行為，見 [官方快取標頭說明](https://vercel.com/docs/caching/cache-control-headers)。Vue 使用預設 fetch 快取選項，沒有強制指定 no-store。
+
+| 回應 | 設定 |
+|---|---|
+| 公開觀測查詢 HTTP 200，包含篩選、空資料與既有資料警告 | CDN 有效期 60 秒 |
+| health、POST refresh，以及應用程式錯誤回應 | no-store |
+
+有效期由 CDN 建立該快取開始計算，與 observed_at、fetched_at 或 cron 排程時間無關；正常讀取不會延長原本的有效期。到期後由後續請求觸發重新取得。快取按請求 URL／查詢條件區分，且不同 CDN 區域可能各自建立快取。本機 Python server 不提供 Vercel CDN，能檢查標頭，但不能用它證明正式快取命中。
+
+排程 POST 更新 Turso 不會主動清除 GET 的 CDN 快取，因此新觀測、最近失敗提示或恢復成功狀態可能在剩餘 TTL 期間仍顯示上一份快照。這版沒有加入 stale-while-revalidate 或主動清除功能；快取可能提前被驅逐，不保證一定保存完整 60 秒。
 
 ## 開發過程遇到的架構問題與解法
 
@@ -280,7 +303,7 @@ JSON 回應設定 Content-Type、正確的 UTF-8 byte Content-Length 與 `Cache-
 
 只在 POST 回應中附上失敗訊息，下一位訪客透過 GET 查詢時就看不到；將狀態存在 Python 全域變數，也無法供不同執行個體可靠共用。
 
-因此新增 Turso 狀態表。CWA timeout 時保存 failed／CWA_UNAVAILABLE，保留原資料與上次成功時間。之後任何公開 GET 都會讀到同一狀態，Vue 顯示警告；成功更新後清除錯誤，公開提示也隨之解除。
+因此新增 Turso 狀態表。CWA timeout 時保存 failed／CWA_UNAVAILABLE，保留原資料與上次成功時間。後續公開 GET 會帶出該狀態，Vue 顯示警告；成功更新後清除錯誤，公開提示也隨之解除。啟用 CDN 快取後，新失敗或恢復狀態可能等到原快取到期才顯示，見公開查詢快取說明。
 
 如果 Turso 本身不可用，連失敗狀態也可能無法保存；目前 API 回 503，前端保留已載入的資料並顯示讀取錯誤。程式目前在 CWAError 路徑寫入 CWA_UNAVAILABLE，沒有保證每個資料庫錯誤都能持久化為 DATABASE_UNAVAILABLE。
 
@@ -317,7 +340,13 @@ CWA 的數值包含一般數字及特殊標記，需要在標準化層保留其�
 
 換服務也需要核對 HTTP 相容性。完整 363 站 JSON 快照約 165 KB，而 [cron-job.org FAQ](https://cron-job.org/en/faq/)列出 64 KB 輸出限制與一般 30 秒逾時。故在既有更新入口加入 `Prefer: return=minimal`，更新成功僅回摘要，同時省去更新後再查詢完整測站的工作。
 
-原本 CWA 失敗但有快取時，HTTP 200 代表可提供舊資料，不代表這次更新成功。一般查詢保留這個回退行為；排程的簡短模式改回非 2xx，讓排程服務辨識失敗，公開 GET 仍從資料庫取得失敗警告。新服務的正式簡短回應、至少兩次真實自動更新，以及重新部署後持續更新均已驗收；失敗、恢復與自動停用通知已設定，但通知實際投遞尚未實測。更換服務不等同取得準點或 uptime 保證。
+原本 CWA 失敗但有既有觀測資料時，HTTP 200 代表可提供舊資料，不代表這次更新成功。一般查詢保留這個回退行為；排程的簡短模式改回非 2xx，讓排程服務辨識失敗，公開 GET 仍從資料庫取得失敗警告。新服務的正式簡短回應、至少兩次真實自動更新，以及重新部署後持續更新均已驗收；失敗、恢復與自動停用通知已設定，但通知實際投遞尚未實測。更換服務不等同取得準點或 uptime 保證。
+
+### 10. 公開資料共用快取，但瀏覽器與更新入口需要不同規則
+
+原本所有 JSON 回應都用 no-store，訪客每次讀取都重新執行 Function 並查詢 Turso。觀測快照對訪客相同，又每 10 分鐘才由排程更新，適合在公開 GET 回應前加入短時間共用快取。
+
+共用 send_json 新增僅能以名稱傳入的 cache_control 參數，預設仍為 no-store；只有公開觀測查詢的 HTTP 200 指定瀏覽器重新驗證與 Vercel CDN 60 秒快取。前端移除強制 no-store，保留原有載入、重試及錯誤處理。健康檢查、更新成功及錯誤回應均不套用公開查詢的快取。這個分工減少重複查詢，同時保留明確的資料新鮮度取捨。
 
 ## 驗證方式與目前範圍
 
@@ -333,6 +362,7 @@ CWA 的數值包含一般數字及特殊標記，需要在標準化層保留其�
 | 前端互動 | 正式網站驗證篩選、排序、分頁與地圖；目前建置另用模擬 API 驗證載入中、空資料、CWA 失敗提示、已有資料後查詢失敗、初次查詢失敗與成功重試六項情境；窄螢幕以瀏覽器模擬 |
 | 真實排程 | 核對 cron-job.org 預定／實際時間、HTTP 200 與簡短摘要，再以匿名 GET、獨立 Turso SELECT 比對全欄位及 metadata；01:25 更新新增 363 個主鍵，原 2544 列逐欄未變 |
 | 重新部署 | `b214bb5` 於台灣時間 01:38:46 部署完成；01:45 真實排程成功，原快照 2544 個主鍵全部保留，API／Turso 一致，本機 SQLite 未變 |
+| CDN 快取 | 15 項本機隔離情境確認回應標頭；正式匿名 GET 觀察 MISS → HIT、重複內容 hash 相同，等待 TTL 後再次 MISS → HIT；兩個縣市與兩個測站查詢各自命中且資料正確 |
 | 憑證檢查 | 瀏覽器匯出 47 筆請求、14 份解碼後 Source Map、20 個前端檔案，三種有效憑證零命中；公開查詢標頭無 Authorization／Cookie |
 
 timeout 測試替換的是外部取得行為，並使用真實 Turso 驗證失敗狀態保存與回退；前端六項錯誤提示測試則使用目前建置與模擬 API，沒有連線 CWA／Turso。兩者都不代表發生真實服務中斷。測試腳本與完整驗收證據保存在開發工作紀錄中，尚未整理為 repository 內的自動測試套件。
@@ -343,13 +373,29 @@ timeout 測試替換的是外部取得行為，並使用真實 Turso 驗證失�
 
 Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。vercel.json 指定 npm --prefix frontend ci、npm --prefix frontend run build 與 frontend/dist；Python 版本由 .python-version 固定為 3.12。四個後端環境變數使用 Production 範圍，Preview 的資料庫與更新授權尚未配置。
 
-2026-10-06 從外部以不帶登入 cookie 或授權的 GET 驗收正式網址：首頁、health、全站／單站／縣市查詢正常；無效查詢回傳 400，GET refresh 回傳 405。正式 observations 的 363 站全部欄位與 metadata，與獨立 Turso 唯讀查詢一致，API 使用 Cache-Control: no-store。
+2026-10-06 從外部以不帶登入 cookie 或授權的 GET 驗收正式網址：首頁、health、全站／單站／縣市查詢正常；無效查詢回傳 400，GET refresh 回傳 405。正式 observations 的 363 站全部欄位與 metadata，與獨立 Turso 唯讀查詢一致，當時 API 使用 Cache-Control: no-store；2026-10-07 起公開觀測查詢的 HTTP 200 已改為 60 秒 CDN 快取，其餘設定見快取章節。
 
 實際瀏覽器驗證縣市 23 站篩選、基隆單站資料、氣溫比較升序、濕度表格降序、兩種分頁、降雨圖層與地圖縮放操作；重新載入後仍可查回 363 站。390 px 手機尺寸檢查為瀏覽器模擬，尚未以真實手機驗收。公開 HTML 及直接引用的 JS／CSS 未命中當次本機已知憑證；此項不涵蓋未知歷史憑證或 Vercel 平台日誌。
 
 正式 POST 更新曾回傳 504，Vercel 日誌確認請求達到設定的 60 秒執行上限；事後唯讀核對仍為 729 筆。改成每 50 列一條多列 UPSERT 後，90618c1 已部署為 Production／Ready；重新部署前後 729 筆歷史資料與狀態逐欄一致。使用者執行一次正式 POST，HTTP 200、耗時 8.148 秒、更新狀態 succeeded，總筆數增至 1092，最新觀測為 2026-10-06T16:20:00+08:00。驗收腳本與後續獨立唯讀核對確認 363 站完整資料／metadata 一致，更新時間前進，本機 SQLite 未變更；cron-job.org 的真實排程觸發亦已另行驗收，見下一節。
 
 2026-10-07 台灣時間 01:38:46，`b214bb5` 已完成新的 Production 部署。01:45 排程在新部署後成功更新，公開首頁與 health 為 HTTP 200；獨立 GET／SELECT 確認 363 站全部欄位與 metadata 一致，歷史總數為當次快照 3633，原 2544 個主鍵全部保留，本機 SQLite 未變。因排程持續更新，持久化判斷以既有主鍵保留為依據，不要求正常 UPSERT 後每個欄位永久不變。
+
+### 60 秒 CDN 快取正式驗收（2026-10-07，台灣時間）
+
+`0ab70cd` 已推送至 GitHub main，Production 部署於 02:30:42 完成。正式首頁引用的 JS／CSS 與本機建置 SHA256 一致。02:42～02:43 使用不帶 Authorization、Cookie 或強制重新驗證標頭的匿名 GET，核對 HTTP 狀態、x-vercel-cache、Age、JSON 與回應內容 hash：
+
+| 情境 | 實際結果 |
+|---|---|
+| 全站首次／重複查詢 | MISS → HIT，363 站，內容 hash 相同 |
+| 南投縣／嘉義市 | 分別回 40／4 站，各自 MISS → HIT，資料皆屬指定縣市 |
+| 測站 12J990／12Q970 | 各回 1 站且代碼正確，各自 MISS → HIT |
+| health／GET refresh／無效 query | 分別 HTTP 200／405／400，皆 no-store，未命中快取 |
+| 最後一次 HIT 後等待 78.64 秒 | 下一次 MISS、Age 0，緊接著 HIT，兩次內容一致 |
+
+這次全站 MISS／HIT 的 requests.elapsed 分別為 3.263／0.092 秒；到期後為 2.368／0.098 秒。該數值量測請求到收到回應標頭的時間，不是完整下載時間；單次結果不代表長期延遲或固定加速倍數。到期後 JSON 仍可相同，因為重新查詢不代表資料庫一定產生新觀測。
+
+這次確認指定 TTL、命中及超過 TTL 後重新取得的行為，沒有量測恰好第 60 秒的邊界。快取可能提早被驅逐，實測範圍為單一請求位置，沒有保證全球每個區域的狀態相同。正式驗收僅發 GET，沒有送 POST、讀取 .env 或直接連線資料庫；POST 成功／失敗及資料庫 503 的不快取標頭由隔離測試驗證。
 
 ## 每 10 分鐘自動更新（部署必做）
 
@@ -408,6 +454,7 @@ Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。
 ## 已知限制與後續驗證
 
 - cron-job.org 每 10 分鐘排程已啟用，真實自動執行與重新部署後持續運作通過；GitHub 氣象 workflow 已移除。網站新鮮度取決於最後一次成功更新，排程觸發不保證準點或成功。
+- 公開觀測 JSON 使用 60 秒 CDN 快取，觀測及更新狀態可能延後顯示；POST 不主動清除快取。快取驗收只涵蓋單一請求位置，沒有測量全球各區命中率或真實 Turso 查詢次數。
 - 最新查詢為「每站最新一筆」，各站的觀測時間可能不同。摘要使用可用數值的未加權平均，缺值不參與計算。
 - 狀態表只保存最近一次結果，沒有完整更新歷程。API 尚未提供跨執行個體的更新鎖；舊 Actions concurrency 群組不適用於外部排程服務。API 頻率限制與重試退避尚未實作；排程服務 timeout 不代表後端一定停止或資料未提交，應先查詢更新狀態再決定是否重跑。
 - CWA 請求 timeout 為 15 秒，前端 GET timeout 為 20 秒；部署時需確認平台執行時間、連線延遲及 runtime 相容性。
