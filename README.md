@@ -349,11 +349,11 @@ Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。
 
 ## 每 30 分鐘自動更新（部署必做）
 
-已選定 GitHub Actions，每 30 分鐘呼叫一次現有 `POST /api/refresh`。目前尚未建立或啟用 workflow，待 Vercel 正式部署與管理更新驗收通過後接入。
+已建立 `.github/workflows/weather-refresh.yml`，保留手動觸發並設定 `17,47 * * * *` 的每 30 分鐘 schedule；排程設定需推送至 main 才會生效，至少兩次真實 schedule 觸發仍待驗收。2026-10-06 首次真實 Actions 手動執行通過，run #1 使用 main 的 1da5b89；更新請求耗時 8.659 秒、HTTP 200、處理 363 站，Turso 總筆數由 1092 增至 1455，最新觀測為 16:50。獨立唯讀核對確認 API／Turso 完整資料一致、原有歷史列未變、本機 SQLite 未變，成功時間落在本次 run 期間。
 
 [GitHub Actions schedule](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule) 最短支援每 5 分鐘執行一次；本專案採每 30 分鐘一次。排程檔需存在於 repository 的 default branch。為降低整點高負載的影響，可安排在每小時第 17、47 分鐘，例如 `17,47 * * * *`；實際觸發仍可能延遲或遺漏，不保證準點。
 
-GitHub Actions 的管理 token 使用 repository secret，只有後端更新授權需要交給排程；CWA 與 Turso 憑證留在 Vercel。workflow 需核對 HTTP／JSON 與 `meta.refresh.status`，避免將 200 的失敗回退誤認為更新成功，也會保留手動觸發以供驗收。
+GitHub Actions 使用 repository secret `REFRESH_API_TOKEN`，透過步驟環境變數注入，再由 Python 放入授權 header；CWA 與 Turso 憑證留在 Vercel。runner 直接使用 Python 標準函式庫，無需 checkout 或安裝專案依賴。workflow 核對 HTTP／JSON、成功狀態、本次更新摘要與筆數；200 但附有更新失敗 warning 仍判為失敗。日誌僅列成功摘要，請求不自動重試或跟隨 redirect。
 
 Public repository 連續 60 天無活動時，GitHub 會自動停用 scheduled workflow，需要留意作業交付後的排程狀態。Public repository 使用 standard runner 免費，private repository 消耗方案內額度，見 [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。
 
@@ -363,11 +363,11 @@ Public repository 連續 60 天無活動時，GitHub 會自動停用 scheduled w
 
 ## 已知限制與部署待辦
 
-- 目前沒有自動更新排程；已選定 GitHub Actions 每 30 分鐘一次。啟用前，網站新鮮度取決於最後一次成功執行管理更新。
+- 每 30 分鐘排程已加入 workflow，真實 schedule 觸發仍待驗收。網站新鮮度取決於最後一次成功更新，排程觸發不保證準點或成功。
 - 最新查詢為「每站最新一筆」，各站的觀測時間可能不同。摘要使用可用數值的未加權平均，缺值不參與計算。
-- 狀態表只保存最近一次結果，沒有完整更新歷程。並行更新的排程互斥、重試退避與頻率限制尚未實作。
+- 狀態表只保存最近一次結果，沒有完整更新歷程。Actions 設有共用 concurrency 群組，保留正在執行的 job；它只限制同群組 workflow，不阻止其他管理端並行呼叫 API。重試退避與 API 頻率限制尚未實作。
 - CWA 請求 timeout 為 15 秒，前端 GET timeout 為 20 秒；部署時需確認平台執行時間、連線延遲及 runtime 相容性。
-- libsql 含平台相關安裝產物；目前部署的遠端讀取與每批 50 列 UPSERT 寫入均已真實驗收。正式更新耗時只完成一次量測，尚未測試不同批次大小或長期延遲。
+- libsql 含平台相關安裝產物；目前部署的遠端讀取與每批 50 列 UPSERT 寫入均已真實驗收。兩次成功正式更新的完整請求耗時為 8.148 與 8.659 秒，尚未測試不同批次大小或長期延遲。
 - Leaflet 底圖需要網路並保留 OpenStreetMap attribution；底圖失敗提示與測站圓點可用，但不提供離線底圖。
 - Vercel 已整合 frontend/dist 與根目錄 api/，建置設定與公開路由已核對。Production 環境變數已由使用者設定；Preview 範圍未配置。
 - 正式網址、重新部署持久化與帶授權的正式更新已驗收；正式環境的授權拒絕路徑、失敗提示與每 30 分鐘排程仍待驗收。

@@ -1,8 +1,10 @@
 name: Refresh weather observations
 
-# 手動驗收成功後，再加入每 30 分鐘的 schedule。
+# 支援手動觸發與每 30 分鐘更新。
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "17,47 * * * *"
 
 permissions: {}
 
