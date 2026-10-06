@@ -2,7 +2,7 @@
 
 使用中央氣象署 `O-A0003-001` 測站觀測資料，完成資料取得、標準化、SQLite／Turso 儲存與 Vue 視覺化。本專案呈現測站的即時觀測快照；氣溫、濕度、氣壓、風速、風向及降雨都可追溯至資料來源。
 
-目前已完成本機前後端與真實 Turso 整合，並部署至 Vercel。公開查詢、正式 CWA 更新寫入與重新部署持久化已驗收；每 30 分鐘自動更新與其真實排程驗收仍待完成。
+目前已完成本機前後端與真實 Turso 整合，並部署至 Vercel。公開查詢、正式 CWA 更新寫入與重新部署持久化已驗收；目前改採 cron-job.org 每 10 分鐘更新；簡短回應的正式部署與真實排程驗收仍待完成。
 
 **正式網站：[臺灣氣象觀測](https://l3-cw-av2-green.vercel.app/)**
 
@@ -50,7 +50,7 @@
 
 ```mermaid
 flowchart LR
-    Actions["GitHub Actions"] -.->|POST /api/refresh| CWA["CWA API"]
+    Scheduler["cron-job.org"] -.->|POST /api/refresh| CWA["CWA API"]
     CWA --> Normalize
     Normalize -->|同一次請求保存觀測與成功狀態| DB[(Turso)]
     Browser["Vue 公開頁面"] -->|GET /api/observations| Read
@@ -64,11 +64,11 @@ flowchart LR
     style Backend fill:none,stroke:#64748b,stroke-width:1px,stroke-dasharray:5 5
 ```
 
-圖中虛線箭頭表示尚待接入的排程流程。已選定 GitHub Actions 每 30 分鐘帶授權呼叫 `POST /api/refresh`，由 Python 後端取得 CWA 資料；圖中省略更新 handler 節點。Actions 只持有管理更新 token，CWA 與 Turso 憑證留在 Vercel 後端。
+圖中虛線箭頭表示尚待接入並驗收的排程流程。已選定 cron-job.org 每 10 分鐘帶授權呼叫 `POST /api/refresh`，由 Python 後端取得 CWA 資料；圖中省略更新 handler 節點。排程服務只需持有管理更新 token，CWA 與 Turso 憑證留在 Vercel 後端。
 
 Vue 透過後端 API 讀取 Turso 的資料。CWA 金鑰、Turso token 與管理更新 token 都由後端使用；瀏覽器不直接連線 CWA 或 Turso。
 
-畫面上的「重新讀取」只呼叫 `GET /api/observations`。只有管理更新成功後，資料庫才會取得新一批 CWA 資料；因此重讀相同內容並不表示前端快取失效。專案目前沒有自動更新排程。
+畫面上的「重新讀取」只呼叫 `GET /api/observations`。只有管理更新成功後，資料庫才會取得新一批 CWA 資料；因此重讀相同內容並不表示前端快取失效。原 GitHub 氣象更新 workflow 已停用，新 cron-job.org 排程尚待建立與驗收。
 
 本機 SQLite 是另一條練習流程：`python -m fetch_cwa` 取得並標準化 CWA 資料，再保存至本機 `.db`。本機 SQLite 與 Turso 不會自動同步；網站 API 使用 Turso。
 
@@ -256,6 +256,10 @@ python -B -m fetch_cwa
 
 查詢只接受 `county_name`／`station_id`，拒絕未知、重複或空白參數。更新入口不接受 query 或 request body，並拒絕重複授權標頭、重複 Content-Length、非零內容長度及 Transfer-Encoding。
 
+`POST /api/refresh` 可帶 `Prefer: return=minimal`，成功時回傳 `status`、`processed_count`、`database_count`、`fetched_at` 的簡短 JSON。這個 header 只選擇回應格式，仍需原本的 Bearer 授權，而且不接受 query 或 body。未帶此 header 時沿用完整 `data`／`meta` 回應。
+
+簡短模式的 CWA 失敗會先保存失敗狀態，再回 HTTP 503／`CWA_UNAVAILABLE`；一般完整模式有既有資料時仍可回 HTTP 200 與 warning。公開 GET 維持讀取舊觀測與最近更新狀態。資料庫操作失敗回 HTTP 503／`DATABASE_UNAVAILABLE`。
+
 JSON 回應設定 Content-Type、正確的 UTF-8 byte Content-Length 與 `Cache-Control: no-store`。資料庫不可用時回傳 503 與固定錯誤碼，不回傳原始例外或帶憑證的 URL。
 
 ## 開發過程遇到的架構問題與解法
@@ -270,7 +274,7 @@ JSON 回應設定 Content-Type、正確的 UTF-8 byte Content-Length 與 `Cache-
 
 若每次開頁或按按鈕都取得整批 CWA 資料，訪客操作就會觸發外部請求與資料庫寫入，也需要處理更新授權及重複呼叫。
 
-因此拆成公開 GET 與受保護的 POST：Vue 只查詢已保存資料，管理者或預定的每 30 分鐘排程負責更新。這讓同一批資料能由多位訪客共用，並使 CWA／Turso／管理憑證都留在後端。定時更新仍需另外接入，目前不會因公開頁面重新整理而更新 CWA。
+因此拆成公開 GET 與受保護的 POST：Vue 只查詢已保存資料，管理者或預定的每 10 分鐘排程負責更新。這讓同一批資料能由多位訪客共用，CWA 與 Turso 憑證留在後端，管理更新 token 只供授權操作端與排程服務使用。定時更新仍需另外接入，目前不會因公開頁面重新整理而更新 CWA。
 
 ### 3. CWA 取得邏輯重複，而且 CLI 與網站寫入目標不同
 
@@ -319,6 +323,14 @@ CWA 的數值包含一般數字及特殊標記，需要在標準化層保留其�
 
 使用目前專案函式與實際 libsql 驅動，在隔離本機資料庫驗證 17 欄一致、重跑不增加、既有值更新，以及第二批故意失敗後觀測與狀態全部回滾，結果通過。遠端唯讀測試另確認一條 SQL 可綁定 850 個參數。修改後已在正式環境執行一次真實更新：HTTP 200、耗時 8.148 秒，363 站寫入成功，總筆數由 729 增至 1092；公開 GET 與獨立 Turso 查詢的全部資料及 metadata 一致。這次沒有再發生 504，但此耗時包含完整請求，尚未拆分 CWA、資料庫與查詢各階段，也不代表後續每次更新都固定耗時。
 
+### 9. 排程觸發成功與資料更新成功需要分開驗證
+
+最初選用 GitHub Actions 每 30 分鐘更新。手動觸發與真實寫入成功，但排程發布後一段時間沒有任何 schedule 紀錄；2026-10-07 台灣時間 00:02:08 才查到首次 schedule 成功，沒有落在設定的每小時第 17、47 分。執行紀錄未提供原預定時段，所以不能由此精確判定延遲或遺漏次數。[GitHub 官方文件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)說明排程在高負載時可能延遲或被丟棄；目前改選 cron-job.org，依其執行紀錄與公開更新狀態驗收。
+
+換服務也需要核對 HTTP 相容性。完整 363 站 JSON 快照約 165 KB，而 [cron-job.org FAQ](https://cron-job.org/en/faq/)列出 64 KB 輸出限制與一般 30 秒逾時。故在既有更新入口加入 `Prefer: return=minimal`，更新成功僅回摘要，同時省去更新後再查詢完整測站的工作。
+
+原本 CWA 失敗但有快取時，HTTP 200 代表可提供舊資料，不代表這次更新成功。一般查詢保留這個回退行為；排程的簡短模式改回非 2xx，讓排程服務辨識失敗，公開 GET 仍從資料庫取得失敗警告。新服務的正式簡短回應、通知與至少兩次真實自動更新仍待驗收；更換服務不等同取得準點或 uptime 保證。
+
 ## 驗證方式與目前範圍
 
 截至 2026-10-06 已完成以下驗證；這是當時的結果，測站數與資料庫筆數會隨後續更新變動。
@@ -347,30 +359,51 @@ Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。
 
 正式 POST 更新曾回傳 504，Vercel 日誌確認請求達到設定的 60 秒執行上限；事後唯讀核對仍為 729 筆。改成每 50 列一條多列 UPSERT 後，90618c1 已部署為 Production／Ready；重新部署前後 729 筆歷史資料與狀態逐欄一致。使用者執行一次正式 POST，HTTP 200、耗時 8.148 秒、更新狀態 succeeded，總筆數增至 1092，最新觀測為 2026-10-06T16:20:00+08:00。驗收腳本與後續獨立唯讀核對確認 363 站完整資料／metadata 一致，更新時間前進，本機 SQLite 未變更；兩次真實排程觸發仍待驗收。
 
-## 每 30 分鐘自動更新（部署必做）
+## 每 10 分鐘自動更新（部署必做）
 
-已建立 `.github/workflows/weather-refresh.yml`，保留手動觸發並設定 `17,47 * * * *` 的每 30 分鐘 schedule；排程設定需推送至 main 才會生效，至少兩次真實 schedule 觸發仍待驗收。2026-10-06 首次真實 Actions 手動執行通過，run #1 使用 main 的 1da5b89；更新請求耗時 8.659 秒、HTTP 200、處理 363 站，Turso 總筆數由 1092 增至 1455，最新觀測為 16:50。獨立唯讀核對確認 API／Turso 完整資料一致、原有歷史列未變、本機 SQLite 未變，成功時間落在本次 run 期間。
+目前選定 cron-job.org。2026-10-07 已唯讀確認原 GitHub workflow 為 `disabled_manually`、三筆既有執行均已完成；本機已移除 `.github/workflows/weather-refresh.yml`，移除動作需提交推送後才反映到 repository。新服務尚未啟用，簡短回應尚待正式部署與驗收。
 
-[GitHub Actions schedule](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule) 最短支援每 5 分鐘執行一次；本專案採每 30 分鐘一次。排程檔需存在於 repository 的 default branch。為降低整點高負載的影響，可安排在每小時第 17、47 分鐘，例如 `17,47 * * * *`；實際觸發仍可能延遲或遺漏，不保證準點。
+### 建立排程的設定
 
-GitHub Actions 使用 repository secret `REFRESH_API_TOKEN`，透過步驟環境變數注入，再由 Python 放入授權 header；CWA 與 Turso 憑證留在 Vercel。runner 直接使用 Python 標準函式庫，無需 checkout 或安裝專案依賴。workflow 核對 HTTP／JSON、成功狀態、本次更新摘要與筆數；200 但附有更新失敗 warning 仍判為失敗。日誌僅列成功摘要，請求不自動重試或跟隨 redirect。
+| 設定 | 值 |
+|---|---|
+| URL | `https://l3-cw-av2-green.vercel.app/api/refresh` |
+| HTTP method | `POST` |
+| Request body | 空白 |
+| 自訂 header | `Authorization: Bearer <REFRESH_API_TOKEN>`，由使用者直接填入既有值 |
+| 自訂 header | `Prefer: return=minimal` |
+| 時區 | `Asia/Taipei` |
+| 排程 | `7,17,27,37,47,57 * * * *`，每天 144 次 |
+| 通知 | 更新失敗、失敗後恢復成功、工作自動停用 |
+| 初始狀態 | 保持停用，先核對部署與完成一次受控測試 |
 
-Public repository 連續 60 天無活動時，GitHub 會自動停用 scheduled workflow，需要留意作業交付後的排程狀態。Public repository 使用 standard runner 免費，private repository 消耗方案內額度，見 [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。
+選定每小時第 7、17、27、37、47、57 分，屬於本專案設定，不是來源資料發布時間或準點保證。更新同一觀測主鍵使用 UPSERT，歷史筆數不會因此重複增加，但 fetched_at 仍會變動。CWA／Turso 憑證只留在後端，不交給排程服務。
 
-選型原因：Vercel Hobby 的單一 Cron job 最頻繁只能每天一次，無法直接達成每 30 分鐘更新，見 [Vercel 方案限制](https://vercel.com/docs/cron-jobs/usage-and-pricing)。GitHub Actions 可以沿用現有 POST 更新入口。
+[cron-job.org 官方 FAQ](https://cron-job.org/en/faq/)支援免費、最短每分鐘執行與自訂 HTTP 請求；一般逾時與回應大小列為 30 秒及 64 KB，建立時另核對帳號實際限制。歷史紀錄與失敗通知有助追查，但官方不保證準時；連續多次失敗可能自動停用，需開啟通知並處理根因。
 
-啟用後，至少核對兩次實際排程觸發、資料與成功狀態，再驗收重新部署後仍正常更新。這些是待實作與驗收項目。
+選型原因：Vercel Hobby 的單一 Cron job 最頻繁只能每天一次，無法直接達成每 10 分鐘更新，見 [Vercel 方案限制](https://vercel.com/docs/cron-jobs/usage-and-pricing)。cron-job.org 能沿用現有 POST 更新入口，並以簡短回應與 HTTP 狀態碼辨識更新結果。
+
+### 驗收與切換
+
+1. 完成後端簡短模式的隔離驗證，再部署新版本。
+2. 確認原 GitHub workflow 已停用且沒有執行中工作，新 cron 工作仍維持停用。
+3. 核對目的 URL、method、授權、空 body、逾時與通知，再執行一次受控真實更新。
+4. 確認 HTTP 200、摘要 succeeded、測站處理數與正式 GET／Turso 一致後，才啟用排程。
+5. 至少核對兩次真實自動執行的 provider 紀錄、更新成功時間及觀測資料，再驗收重新部署後仍有效。
+6. 完整切換後清除 GitHub repository 的氣象更新 secret。本機與 Vercel 繼續使用既有更新 token。
+
+原 Actions 的成功驗收保留為歷史：2026-10-06 手動 run #1 更新耗時 8.659 秒、363 站，Turso 1092 → 1455；獨立唯讀核對 API／Turso 一致、原歷史列與本機 SQLite 未變。2026-10-07 首次 schedule run 成功，公開 last_success 時間落在該 run 期間；這些結果不能代替 cron-job.org 的正式驗收。
 
 ## 已知限制與部署待辦
 
-- 每 30 分鐘排程已加入 workflow，真實 schedule 觸發仍待驗收。網站新鮮度取決於最後一次成功更新，排程觸發不保證準點或成功。
+- cron-job.org 每 10 分鐘排程尚待建立及啟用；GitHub 氣象 workflow 已停用。網站新鮮度取決於最後一次成功更新，排程觸發不保證準點或成功。
 - 最新查詢為「每站最新一筆」，各站的觀測時間可能不同。摘要使用可用數值的未加權平均，缺值不參與計算。
-- 狀態表只保存最近一次結果，沒有完整更新歷程。Actions 設有共用 concurrency 群組，保留正在執行的 job；它只限制同群組 workflow，不阻止其他管理端並行呼叫 API。重試退避與 API 頻率限制尚未實作。
+- 狀態表只保存最近一次結果，沒有完整更新歷程。API 尚未提供跨執行個體的更新鎖；舊 Actions concurrency 群組不適用於外部排程服務。API 頻率限制與重試退避尚未實作；排程服務 timeout 不代表後端一定停止或資料未提交，應先查詢更新狀態再決定是否重跑。
 - CWA 請求 timeout 為 15 秒，前端 GET timeout 為 20 秒；部署時需確認平台執行時間、連線延遲及 runtime 相容性。
 - libsql 含平台相關安裝產物；目前部署的遠端讀取與每批 50 列 UPSERT 寫入均已真實驗收。兩次成功正式更新的完整請求耗時為 8.148 與 8.659 秒，尚未測試不同批次大小或長期延遲。
 - Leaflet 底圖需要網路並保留 OpenStreetMap attribution；底圖失敗提示與測站圓點可用，但不提供離線底圖。
 - Vercel 已整合 frontend/dist 與根目錄 api/，建置設定與公開路由已核對。Production 環境變數已由使用者設定；Preview 範圍未配置。
-- 正式網址、重新部署持久化與帶授權的正式更新已驗收；正式環境的授權拒絕路徑、失敗提示與每 30 分鐘排程仍待驗收。
+- 正式網址、重新部署持久化與帶授權的完整回應更新已驗收；正式環境的簡短回應、授權拒絕路徑、失敗提示與每 10 分鐘排程仍待驗收。
 - 本機已排除 `.env*`（保留 `.env.example`）、`.db`、`.venv`、快取、node_modules、dist 與 `.vercel`。忽略規則不會移除過去已提交的秘密；對外推送前還需檢查 Git 歷史。
 
 ## 參考

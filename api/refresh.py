@@ -106,13 +106,20 @@ class handler(ObservationsHandler):
             )
             return
 
+        return_minimal = (
+            self.headers.get("Prefer", "").strip().lower()
+            == "return=minimal"
+        )
+
         try:
-            payload = refresh_and_get_observations_payload()
+            payload = refresh_and_get_observations_payload(
+                return_minimal=return_minimal,
+            )
         except CWAError:
             self.send_api_error(
                 503,
                 "CWA_UNAVAILABLE",
-                "更新失敗，目前沒有可用的既有資料",
+                "CWA 資料更新失敗，請稍後再試",
             )
             return
         except Exception as error:

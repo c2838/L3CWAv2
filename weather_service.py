@@ -62,13 +62,18 @@ def refresh_turso_observations():
     }
 
 
-def refresh_and_get_observations_payload():
-    """更新後回傳資料；CWA 失敗時保存狀態並回傳既有資料。"""
+def refresh_and_get_observations_payload(*, return_minimal=False):
+    """更新資料；可選擇回傳簡短摘要或完整觀測資料。"""
 
     try:
         summary = refresh_turso_observations()
     except CWAError:
         record_refresh_failure("CWA_UNAVAILABLE")
+
+        # 排程需要明確的失敗回應，讓 API 回傳 HTTP 503。
+        if return_minimal:
+            raise
+
         payload = get_observations_payload()
 
         # 沒有既有資料可回退時，將原本的 CWAError 往上傳遞。
@@ -76,6 +81,12 @@ def refresh_and_get_observations_payload():
             raise
 
         return payload
+
+    if return_minimal:
+        return {
+            "status": "succeeded",
+            **summary,
+        }
 
     payload = get_observations_payload()
     payload["meta"]["refresh"].update(summary)
