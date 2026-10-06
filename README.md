@@ -2,7 +2,7 @@
 
 使用中央氣象署 `O-A0003-001` 測站觀測資料，完成資料取得、標準化、SQLite／Turso 儲存與 Vue 視覺化。本專案呈現測站的即時觀測快照；氣溫、濕度、氣壓、風速、風向及降雨都可追溯至資料來源。
 
-目前已完成本機前後端與真實 Turso 整合，並部署至 Vercel。公開查詢、正式 CWA 更新寫入與重新部署持久化已驗收；目前改採 cron-job.org 每 10 分鐘更新；簡短回應的正式部署與真實排程驗收仍待完成。
+目前已完成本機前後端與真實 Turso 整合，並部署至 Vercel。公開查詢、正式 CWA 更新寫入與重新部署持久化已驗收；cron-job.org 每 10 分鐘更新已啟用，2026-10-07 連續兩次真實排程、簡短回應與資料一致性驗收通過。正式失敗情境與排程在重新部署後仍有效的驗收另列於待辦。
 
 **正式網站：[臺灣氣象觀測](https://l3-cw-av2-green.vercel.app/)**
 
@@ -50,7 +50,7 @@
 
 ```mermaid
 flowchart LR
-    Scheduler["cron-job.org"] -.->|POST /api/refresh| CWA["CWA API"]
+    Scheduler["cron-job.org"] -->|POST /api/refresh| CWA["CWA API"]
     CWA --> Normalize
     Normalize -->|同一次請求保存觀測與成功狀態| DB[(Turso)]
     Browser["Vue 公開頁面"] -->|GET /api/observations| Read
@@ -64,11 +64,11 @@ flowchart LR
     style Backend fill:none,stroke:#64748b,stroke-width:1px,stroke-dasharray:5 5
 ```
 
-圖中虛線箭頭表示尚待接入並驗收的排程流程。已選定 cron-job.org 每 10 分鐘帶授權呼叫 `POST /api/refresh`，由 Python 後端取得 CWA 資料；圖中省略更新 handler 節點。排程服務只需持有管理更新 token，CWA 與 Turso 憑證留在 Vercel 後端。
+cron-job.org 已每 10 分鐘帶授權呼叫 `POST /api/refresh`，由 Python 後端取得 CWA 資料；圖中省略更新 handler 節點。排程服務只需持有管理更新 token，CWA 與 Turso 憑證留在 Vercel 後端。
 
 Vue 透過後端 API 讀取 Turso 的資料。CWA 金鑰、Turso token 與管理更新 token 都由後端使用；瀏覽器不直接連線 CWA 或 Turso。
 
-畫面上的「重新讀取」只呼叫 `GET /api/observations`。只有管理更新成功後，資料庫才會取得新一批 CWA 資料；因此重讀相同內容並不表示前端快取失效。原 GitHub 氣象更新 workflow 已停用，新 cron-job.org 排程尚待建立與驗收。
+畫面上的「重新讀取」只呼叫 `GET /api/observations`。只有管理更新成功後，資料庫才會取得新一批 CWA 資料；因此重讀相同內容並不表示前端快取失效。原 GitHub 氣象更新 workflow 已移除，cron-job.org 排程已啟用並完成兩次真實自動更新驗收。
 
 本機 SQLite 是另一條練習流程：`python -m fetch_cwa` 取得並標準化 CWA 資料，再保存至本機 `.db`。本機 SQLite 與 Turso 不會自動同步；網站 API 使用 Turso。
 
@@ -274,7 +274,7 @@ JSON 回應設定 Content-Type、正確的 UTF-8 byte Content-Length 與 `Cache-
 
 若每次開頁或按按鈕都取得整批 CWA 資料，訪客操作就會觸發外部請求與資料庫寫入，也需要處理更新授權及重複呼叫。
 
-因此拆成公開 GET 與受保護的 POST：Vue 只查詢已保存資料，管理者或預定的每 10 分鐘排程負責更新。這讓同一批資料能由多位訪客共用，CWA 與 Turso 憑證留在後端，管理更新 token 只供授權操作端與排程服務使用。定時更新仍需另外接入，目前不會因公開頁面重新整理而更新 CWA。
+因此拆成公開 GET 與受保護的 POST：Vue 只查詢已保存資料，管理者或預定的每 10 分鐘排程負責更新。這讓同一批資料能由多位訪客共用，CWA 與 Turso 憑證留在後端，管理更新 token 只供授權操作端與排程服務使用。定時更新由 cron-job.org 呼叫受保護的 POST；公開頁面重新整理只讀取已保存的資料。
 
 ### 3. CWA 取得邏輯重複，而且 CLI 與網站寫入目標不同
 
@@ -361,7 +361,7 @@ Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。
 
 ## 每 10 分鐘自動更新（部署必做）
 
-目前選定 cron-job.org。2026-10-07 已唯讀確認原 GitHub workflow 為 `disabled_manually`、三筆既有執行均已完成；本機已移除 `.github/workflows/weather-refresh.yml`，移除動作需提交推送後才反映到 repository。新服務尚未啟用，簡短回應尚待正式部署與驗收。
+目前使用 cron-job.org。2026-10-07 的 `841010a` 已部署至 Vercel Production，GitHub repository 已移除 `.github/workflows/weather-refresh.yml`，原 workflow 狀態為 `deleted`。cron-job.org 已啟用每 10 分鐘更新，兩次真實排程與簡短回應驗收通過。GitHub repository 的氣象更新 secret 已由使用者移除，唯讀核對確認 repository 無 secrets；本機、Vercel 與 cron-job.org 繼續使用既有更新 token。移除的是 GitHub 儲存的副本，並未撤銷該 token。
 
 ### 建立排程的設定
 
@@ -373,17 +373,21 @@ Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。
 | 自訂 header | `Authorization: Bearer <REFRESH_API_TOKEN>`，由使用者直接填入既有值 |
 | 自訂 header | `Prefer: return=minimal` |
 | 時區 | `Asia/Taipei` |
-| 排程 | `7,17,27,37,47,57 * * * *`，每天 144 次 |
+| 排程 | `5,15,25,35,45,55 * * * *`，每天 144 次 |
 | 通知 | 更新失敗、失敗後恢復成功、工作自動停用 |
-| 初始狀態 | 保持停用，先核對部署與完成一次受控測試 |
+| 逾時 | 30 秒 |
+| 儲存回應 | 已開啟，可從歷史紀錄核對簡短 JSON |
+| 目前狀態 | 已啟用，兩次真實自動更新驗收通過 |
 
-選定每小時第 7、17、27、37、47、57 分，屬於本專案設定，不是來源資料發布時間或準點保證。更新同一觀測主鍵使用 UPSERT，歷史筆數不會因此重複增加，但 fetched_at 仍會變動。CWA／Turso 憑證只留在後端，不交給排程服務。
+實際設定為每小時第 5、15、25、35、45、55 分，屬於本專案設定，不是來源資料發布時間或準點保證。更新同一觀測主鍵使用 UPSERT，歷史筆數不會因此重複增加，但 fetched_at 仍會變動。CWA／Turso 憑證只留在後端，不交給排程服務。
 
 [cron-job.org 官方 FAQ](https://cron-job.org/en/faq/)支援免費、最短每分鐘執行與自訂 HTTP 請求；一般逾時與回應大小列為 30 秒及 64 KB，建立時另核對帳號實際限制。歷史紀錄與失敗通知有助追查，但官方不保證準時；連續多次失敗可能自動停用，需開啟通知並處理根因。
 
 選型原因：Vercel Hobby 的單一 Cron job 最頻繁只能每天一次，無法直接達成每 10 分鐘更新，見 [Vercel 方案限制](https://vercel.com/docs/cron-jobs/usage-and-pricing)。cron-job.org 能沿用現有 POST 更新入口，並以簡短回應與 HTTP 狀態碼辨識更新結果。
 
 ### 驗收與切換
+
+以下為新環境建議的接入順序；本次實際驗收結果另列如下。
 
 1. 完成後端簡短模式的隔離驗證，再部署新版本。
 2. 確認原 GitHub workflow 已停用且沒有執行中工作，新 cron 工作仍維持停用。
@@ -394,16 +398,27 @@ Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。
 
 原 Actions 的成功驗收保留為歷史：2026-10-06 手動 run #1 更新耗時 8.659 秒、363 站，Turso 1092 → 1455；獨立唯讀核對 API／Turso 一致、原歷史列與本機 SQLite 未變。2026-10-07 首次 schedule run 成功，公開 last_success 時間落在該 run 期間；這些結果不能代替 cron-job.org 的正式驗收。
 
+### cron-job.org 真實驗收結果（2026-10-07，台灣時間）
+
+| 預定 | 實際開始 | 開始延遲 | 請求耗時 | 結果 |
+|---|---|---|---|---|
+| 01:15:00 | 01:15:22 | 22.12 秒 | 7.72 秒 | 200 OK |
+| 01:25:00 | 01:25:15 | 15.70 秒 | 8.51 秒 | 200 OK、succeeded |
+
+第二次 provider 保存的 JSON 為 114 bytes，回應為 succeeded、processed_count 363、database_count 2907，fetched_at 為 2026-10-06T17:25:18+00:00（台灣 01:25:18）。獨立匿名 GET 與 Turso 唯讀查詢確認 363 站全欄位及 metadata 一致，最新觀測由 01:00 前進至 01:10、成功時間為 01:25:23.103061，位於該次執行期間。
+
+與第一次更新後的完整快照比對，總筆數 2544 → 2907，新增 363 個主鍵，新增列的 fetched_at 均屬第二次擷取；原 2544 筆逐欄未變，本機 SQLite hash 未變。第一次執行未保存回應本體，因此僅驗收 HTTP 與更新後資料；第二次補齊真實簡短回應。以上為兩次成功自動觸發的證據，不代表長期準點保證或正式失敗通知已實測。助理核對只使用 GET／SELECT，未為驗收額外送 POST。
+
 ## 已知限制與部署待辦
 
-- cron-job.org 每 10 分鐘排程尚待建立及啟用；GitHub 氣象 workflow 已停用。網站新鮮度取決於最後一次成功更新，排程觸發不保證準點或成功。
+- cron-job.org 每 10 分鐘排程已啟用，兩次真實自動執行通過；GitHub 氣象 workflow 已移除。網站新鮮度取決於最後一次成功更新，排程觸發不保證準點或成功。
 - 最新查詢為「每站最新一筆」，各站的觀測時間可能不同。摘要使用可用數值的未加權平均，缺值不參與計算。
 - 狀態表只保存最近一次結果，沒有完整更新歷程。API 尚未提供跨執行個體的更新鎖；舊 Actions concurrency 群組不適用於外部排程服務。API 頻率限制與重試退避尚未實作；排程服務 timeout 不代表後端一定停止或資料未提交，應先查詢更新狀態再決定是否重跑。
 - CWA 請求 timeout 為 15 秒，前端 GET timeout 為 20 秒；部署時需確認平台執行時間、連線延遲及 runtime 相容性。
 - libsql 含平台相關安裝產物；目前部署的遠端讀取與每批 50 列 UPSERT 寫入均已真實驗收。兩次成功正式更新的完整請求耗時為 8.148 與 8.659 秒，尚未測試不同批次大小或長期延遲。
 - Leaflet 底圖需要網路並保留 OpenStreetMap attribution；底圖失敗提示與測站圓點可用，但不提供離線底圖。
 - Vercel 已整合 frontend/dist 與根目錄 api/，建置設定與公開路由已核對。Production 環境變數已由使用者設定；Preview 範圍未配置。
-- 正式網址、重新部署持久化與帶授權的完整回應更新已驗收；正式環境的簡短回應、授權拒絕路徑、失敗提示與每 10 分鐘排程仍待驗收。
+- 正式網址、重新部署持久化、完整及簡短回應更新、兩次每 10 分鐘自動執行已驗收；正式環境的授權拒絕路徑、失敗提示、通知實際投遞，以及排程在重新部署後仍有效的驗收仍待完成。
 - 本機已排除 `.env*`（保留 `.env.example`）、`.db`、`.venv`、快取、node_modules、dist 與 `.vercel`。忽略規則不會移除過去已提交的秘密；對外推送前還需檢查 Git 歷史。
 
 ## 參考
