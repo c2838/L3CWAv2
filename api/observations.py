@@ -65,7 +65,14 @@ class handler(HealthHandler):
             )
             return
 
-        self.send_json(200, payload)
+        self.send_json(
+            200,
+            payload,
+            cache_control="public, max-age=0, must-revalidate",
+            extra_headers={
+                "Vercel-CDN-Cache-Control": "max-age=60",
+            },
+        )
 
 
 if __name__ == "__main__":

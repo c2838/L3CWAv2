@@ -103,7 +103,6 @@ async function reload() {
     const response = await fetch('/api/observations', {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
-      cache: 'no-store',
     })
     if (!response.ok) throw new Error('Request failed')
     const payload = await response.json()

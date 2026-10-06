@@ -3,7 +3,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlsplit
 
 class handler(BaseHTTPRequestHandler):
-    def send_json(self, status_code, payload, extra_headers=None):
+    def send_json(
+        self,
+        status_code,
+        payload,
+        extra_headers=None,
+        *,
+        cache_control="no-store",
+    ):
         """將 python data 轉 json，送出 HTTP 回應"""
         body = json.dumps(
             payload,
@@ -16,7 +23,7 @@ class handler(BaseHTTPRequestHandler):
                     "application/json; charset=utf-8",
                 )
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
 
         if extra_headers:
             for name, value in extra_headers.items():
