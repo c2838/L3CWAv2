@@ -2,7 +2,9 @@
 
 使用中央氣象署 `O-A0003-001` 測站觀測資料，完成資料取得、標準化、SQLite／Turso 儲存與 Vue 視覺化。本專案呈現測站的即時觀測快照；氣溫、濕度、氣壓、風速、風向及降雨都可追溯至資料來源。
 
-目前已完成本機前後端與真實 Turso 整合。正式部署目標為 Vercel，部署設定、正式網址及定時更新尚待完成。
+目前已完成本機前後端與真實 Turso 整合，並部署至 Vercel。公開頁面與唯讀 API 已驗收；正式環境的 CWA 更新寫入、重新部署持久化與定時更新仍待驗收。
+
+**正式網站：[臺灣氣象觀測](https://l3-cw-av2-green.vercel.app/)**
 
 ## 功能
 
@@ -23,7 +25,7 @@
 | 本機資料庫 | Python 內建 sqlite3，用於 SQL 學習與資料驗證 |
 | 網站資料庫 | Turso，透過 libsql 連線 |
 | 前端 | Vue 3、Vite、Leaflet、OpenStreetMap 底圖 |
-| 部署目標 | Vercel 靜態前端與 Python Functions，尚未正式驗收 |
+| 部署 | Vercel 靜態前端與 Python Functions；公開查詢已驗收 |
 
 ```text
 .
@@ -38,6 +40,8 @@
 ├── database_schema.sql         # 觀測表與索引
 ├── refresh_status_schema.sql   # 最近一次更新狀態表
 ├── requirements.txt           # Python 依賴與固定版本
+├── .python-version            # Vercel 使用 Python 3.12
+├── vercel.json                # 前端建置與 Python Function 設定
 ├── .env.example               # 環境變數名稱，沒有真實憑證
 └── frontend/                  # Vue 元件、樣式、Vite 設定及 npm lockfile
 ```
@@ -307,6 +311,14 @@ CWA 的數值包含一般數字及特殊標記，需要在標準化層保留其�
 
 處理方式是確認監聽程序、停止原本的開發 server，再以 `python -B -m api.refresh` 重啟。驗證時同時比較直接 API 與 Vite 代理的完整 JSON，確認新狀態欄位及所有資料一致。`-B` 只是不寫入 bytecode cache，不提供自動重載。
 
+### 8. 遠端逐筆寫入遇到 Function 執行時限
+
+首次正式更新在 Vercel 執行 60 秒後回傳 504。原本使用 libsql 0.1.11 的 `executemany`；核對該版本實作後，確認它會逐列等待 SQL 執行完成。對遠端資料庫而言，363 筆資料會累積多次請求等待，即使都放在同一個交易，也不會自動變成一次網路傳輸。
+
+目前改為每 50 列組成一條參數化的多列 UPSERT，363 列只需要 8 次觀測寫入。所有批次與成功狀態仍在同一個交易提交；任一批次失敗就整批 rollback。SQL 沿用共用的欄位與衝突更新規則，不新增依賴。
+
+使用目前專案函式與實際 libsql 驅動，在隔離本機資料庫驗證 17 欄一致、重跑不增加、既有值更新，以及第二批故意失敗後觀測與狀態全部回滾，結果通過。遠端唯讀測試另確認一條 SQL 可綁定 850 個參數。這些結果支持批次修改，但尚未量測正式請求各階段耗時，也尚未驗證修改後的雲端寫入；正式 504 是否解除仍須重新部署後驗收。
+
 ## 驗證方式與目前範圍
 
 截至 2026-10-06 已完成以下驗證；這是當時的結果，測站數與資料庫筆數會隨後續更新變動。
@@ -324,6 +336,16 @@ CWA 的數值包含一般數字及特殊標記，需要在標準化層保留其�
 timeout 測試替換的是外部取得行為，驗證的是失敗處理與回退流程，不代表發生真實 CWA 服務中斷。測試腳本與完整驗收證據保存在開發工作紀錄中，尚未整理為 repository 內的自動測試套件。
 
 瀏覽器 Network 列表共 49 筆，HAR 匯出 47 筆，未匯出的兩筆未掃描。上述憑證檢查只涵蓋當次本機載入與目前建置；Git 歷史、正式部署版本及真實手機觸控還需另行驗收。
+
+## Vercel 部署與公開查詢驗收
+
+Vercel Root Directory 使用 repository 根目錄，Framework Preset 為 Vite。vercel.json 指定 npm --prefix frontend ci、npm --prefix frontend run build 與 frontend/dist；Python 版本由 .python-version 固定為 3.12。四個後端環境變數使用 Production 範圍，Preview 的資料庫與更新授權尚未配置。
+
+2026-10-06 從外部以不帶登入 cookie 或授權的 GET 驗收正式網址：首頁、health、全站／單站／縣市查詢正常；無效查詢回傳 400，GET refresh 回傳 405。正式 observations 的 363 站全部欄位與 metadata，與獨立 Turso 唯讀查詢一致，API 使用 Cache-Control: no-store。
+
+實際瀏覽器驗證縣市 23 站篩選、基隆單站資料、氣溫比較升序、濕度表格降序、兩種分頁、降雨圖層與地圖縮放操作；重新載入後仍可查回 363 站。390 px 手機尺寸檢查為瀏覽器模擬，尚未以真實手機驗收。公開 HTML 及直接引用的 JS／CSS 未命中當次本機已知憑證；此項不涵蓋未知歷史憑證或 Vercel 平台日誌。
+
+正式 POST 更新曾回傳 504，Vercel 日誌確認請求達到設定的 60 秒執行上限；事後唯讀核對仍為 729 筆，觀測與成功狀態沒有前進。已將 Turso 寫入改為每 50 列一條多列 UPSERT，隔離本機資料庫的欄位一致性、重跑與整批回滾驗證通過；修改後的正式更新、重新部署持久化與兩次真實排程仍待驗收。
 
 ## 每 30 分鐘自動更新（部署必做）
 
@@ -345,10 +367,10 @@ Public repository 連續 60 天無活動時，GitHub 會自動停用 scheduled w
 - 最新查詢為「每站最新一筆」，各站的觀測時間可能不同。摘要使用可用數值的未加權平均，缺值不參與計算。
 - 狀態表只保存最近一次結果，沒有完整更新歷程。並行更新的排程互斥、重試退避與頻率限制尚未實作。
 - CWA 請求 timeout 為 15 秒，前端 GET timeout 為 20 秒；部署時需確認平台執行時間、連線延遲及 runtime 相容性。
-- libsql 含平台相關安裝產物，目前只驗證本機環境；Vercel 的 Python／Linux 建置仍待實際確認。
+- libsql 含平台相關安裝產物；正式 observations 已能查詢 Turso，證明目前部署的連線與讀取路徑可運作，正式更新寫入路徑仍待驗收。
 - Leaflet 底圖需要網路並保留 OpenStreetMap attribution；底圖失敗提示與測站圓點可用，但不提供離線底圖。
-- Vercel 部署需要整合 `frontend/dist` 與根目錄 `api/`，核對 build command、output directory、Python 依賴、同站 API 路由，以及 Preview／Production 環境變數。
-- 正式部署網址、重新部署後資料持久化與排程授權仍待完成。尚未提供可直接操作的 Vercel 部署設定。
+- Vercel 已整合 frontend/dist 與根目錄 api/，建置設定與公開路由已核對。Production 環境變數已由使用者設定；Preview 範圍未配置。
+- 正式網址與部署設定已提供；重新部署後資料持久化、正式更新授權與每 30 分鐘排程仍待驗收。
 - 本機已排除 `.env*`（保留 `.env.example`）、`.db`、`.venv`、快取、node_modules、dist 與 `.vercel`。忽略規則不會移除過去已提交的秘密；對外推送前還需檢查 Git 歷史。
 
 ## 參考

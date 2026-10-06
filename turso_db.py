@@ -134,23 +134,35 @@ def record_refresh_failure(error_code="CWA_UNAVAILABLE"):
 
 
 def save_observations(stations, *, record_refresh_success=False):
-    """將一批標準化測站資料 UPSERT 至 Turso，回傳總筆數。"""
+    """以多列 UPSERT 保存整批資料，觀測與成功狀態使用同一交易。"""
 
     if not stations:
         raise ValueError("沒有測站資料可寫入")
 
-    # 按 SQL 參數順序取值；缺少欄位時會在連線前發生 KeyError。
     parameters = [
         tuple(station[field] for field in OBSERVATION_FIELDS)
         for station in stations
     ]
 
+    # 沿用共用 SQL 的欄位與衝突更新規則，改成每次寫入最多 50 列。
+    insert_part, conflict_part = UPSERT_SQL.split("ON CONFLICT", 1)
+    insert_prefix = insert_part.split("VALUES", 1)[0]
+    row_placeholders = "(" + ", ".join(["?"] * len(OBSERVATION_FIELDS)) + ")"
+    batch_size = 50
+
     with closing(connect_turso()) as connection:
-        # 整批資料使用同一個交易。
         connection.execute("BEGIN")
 
         try:
-            connection.executemany(UPSERT_SQL, parameters)
+            for offset in range(0, len(parameters), batch_size):
+                batch = parameters[offset:offset + batch_size]
+                placeholders = ", ".join([row_placeholders] * len(batch))
+                batch_sql = (
+                    f"{insert_prefix}VALUES {placeholders}\n"
+                    f"ON CONFLICT {conflict_part}"
+                )
+                batch_parameters = tuple(value for row in batch for value in row)
+                connection.execute(batch_sql, batch_parameters)
 
             if record_refresh_success:
                 _write_refresh_status(connection, "succeeded")
